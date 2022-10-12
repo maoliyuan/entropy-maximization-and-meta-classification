@@ -10,16 +10,16 @@ MODELS      = ["DeepLabV3+_WideResNet38", "DualGCNNet_res50"]
 TRAINSET    = TRAINSETS[0]
 VALSET      = VALSETS[0]
 MODEL       = MODELS[0]
-IO          = "/home/chan/io/ood_detection/"
+IO          = "./chan/io/ood_detection/"
 
 class cs_coco_roots:
     """
     OoD training roots for Cityscapes + COCO mix
     """
     model_name  = MODEL
-    init_ckpt   = os.path.join("/home/chan/io/cityscapes/weights/", model_name + ".pth")
-    cs_root     = "/home/datasets/cityscapes/"
-    coco_root   = "/home/datasets/COCO/2017"
+    init_ckpt   = os.path.join("./chan/io/cityscapes/weights/", model_name + ".pth")
+    cs_root     = "./datasets/cityscapes/"
+    coco_root   = "./datasets/COCO/2017"
     io_root     = IO + "meta_ood_" + model_name
     weights_dir = os.path.join(io_root, "weights/")
 
@@ -29,8 +29,8 @@ class laf_roots:
     LostAndFound config class
     """
     model_name = MODEL
-    init_ckpt = os.path.join("/home/chan/io/cityscapes/weights/", model_name + ".pth")
-    eval_dataset_root = "/home/datasets/lost_and_found/"
+    init_ckpt = os.path.join("./chan/io/cityscapes/weights/", model_name + ".pth")
+    eval_dataset_root = "./datasets/lost_and_found/"
     eval_sub_dir = "laf_eval"
     io_root = os.path.join(IO + "meta_ood_" + model_name, eval_sub_dir)
     weights_dir = os.path.join(io_root, "..", "weights/")
@@ -41,8 +41,8 @@ class fs_roots:
     Fishyscapes config class
     """
     model_name = MODEL
-    init_ckpt = os.path.join("/home/chan/io/cityscapes/weights/", model_name + ".pth")
-    eval_dataset_root = "/home/datasets/fishyscapes/"
+    init_ckpt = os.path.join("./chan/io/cityscapes/weights/", model_name + ".pth")
+    eval_dataset_root = "./datasets/fishyscapes/"
     eval_sub_dir = "fs_eval"
     io_root = os.path.join(IO + "meta_ood_" + model_name, eval_sub_dir)
     weights_dir = os.path.join(io_root, "..", "weights/")
@@ -59,7 +59,7 @@ class params:
     learning_rate           = 1e-5
     crop_size               = 480
     val_epoch               = num_training_epochs
-    batch_size              = 8
+    batch_size              = 16
     entropy_threshold       = 0.7
 
 

@@ -78,29 +78,30 @@ def training_routine(config):
         print('\nEpoch {}/{}'.format(epoch + 1, start_epoch + epochs))
         optimizer = optim.Adam(network.parameters(), lr=params.learning_rate)
         trainloader = config.dataset('train', transform, roots.cs_root, roots.coco_root, params.ood_subsampling_factor)
-        dataloader = DataLoader(trainloader, batch_size=params.batch_size, shuffle=True)
+        dataloader = DataLoader(trainloader, batch_size=params.batch_size, shuffle=True, drop_last=True)
         i = 0
         loss = None
-        for x, target in dataloader:
+        for b_idx, (x, target) in enumerate(dataloader):
             optimizer.zero_grad()
-            logits = network(x.cuda())
             y = encode_target(target=target, pareto_alpha=params.pareto_alpha, num_classes=dataset.num_classes,
                               ignore_train_ind=dataset.void_ind, ood_ind=dataset.train_id_out).cuda()
+            logits = network(x.cuda())
             loss = cross_entropy(logits, y)
             loss.backward()
             optimizer.step()
             print('{} Loss: {}'.format(i, loss.item()))
             i += 1
-
-        """Save model state"""
-        save_basename = roots.model_name + "_epoch_" + str(epoch + 1) + "_alpha_" + str(params.pareto_alpha) + ".pth"
-        print('Saving checkpoint', os.path.join(roots.weights_dir, save_basename))
-        torch.save({
-            'epoch': epoch + 1,
-            'state_dict': network.state_dict(),
-            'optimizer_state_dict': optimizer.state_dict(),
-            'loss': loss,
-        }, os.path.join(roots.weights_dir, save_basename))
+            if((b_idx + 1) % 100 == 0):
+                """Save model state"""
+                save_basename = roots.model_name + "_batch_" + str(b_idx + 1) + "_alpha_" + str(params.pareto_alpha) + ".pth"
+                print('Saving checkpoint', os.path.join(roots.weights_dir, save_basename))
+                torch.save({
+                    'epoch': epoch + 1,
+                    'batch': b_idx + 1,
+                    'state_dict': network.state_dict(),
+                    'optimizer_state_dict': optimizer.state_dict(),
+                    'loss': loss,
+                }, os.path.join(roots.weights_dir, save_basename))
         torch.cuda.empty_cache()
 
     end = time.time()

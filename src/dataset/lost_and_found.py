@@ -68,7 +68,7 @@ class LostAndFound(Dataset):
     std = cs.std
     num_eval_classes = cs.num_train_ids
 
-    def __init__(self, split='test', root="/home/datasets/lost_and_found/", transform=None):
+    def __init__(self, split='test', root="./datasets/lost_and_found/", transform=None):
         """Load all filenames."""
         self.transform = transform
         self.root = root

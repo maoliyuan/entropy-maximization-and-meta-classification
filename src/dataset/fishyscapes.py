@@ -29,7 +29,7 @@ class Fishyscapes(Dataset):
     trainid_to_color = {label.train_id: label.color for label in labels}
     label_name_to_id = {label.name: label.id for label in labels}
 
-    def __init__(self, split='Static', root="/home/datasets/fishyscapes/", transform=None):
+    def __init__(self, split='Static', root="./datasets/fishyscapes/", transform=None):
         """Load all filenames."""
         self.transform = transform
         self.root = root

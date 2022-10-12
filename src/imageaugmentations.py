@@ -35,7 +35,7 @@ class Compose(object):
         """Returns images that are augmented with the given augmentations."""
         # img, mask = Image.fromarray(img, mode='RGB'), Image.fromarray(mask, mode='L')
         assert img.size == mask.size
-        for a in self.augmentations:
+        for (idx, a) in enumerate(self.augmentations):
             img, mask, inputs = a(img, mask, *inputs)
         return (img, mask, *inputs)
 

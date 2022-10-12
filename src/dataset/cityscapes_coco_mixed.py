@@ -8,8 +8,8 @@ from src.dataset.cityscapes import Cityscapes
 class CityscapesCocoMix(Dataset):
 
     def __init__(self, split='train', transform=None,
-                 cs_root="/home/datasets/cityscapes",
-                 coco_root="/home/datasets/COCO/2017",
+                 cs_root="./datasets/cityscapes",
+                 coco_root="./datasets/COCO/2017",
                  subsampling_factor=0.1, cs_split=None, coco_split=None,):
 
         self.transform = transform
