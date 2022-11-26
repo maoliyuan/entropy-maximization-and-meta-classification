@@ -3,7 +3,8 @@ from PIL import Image
 from torch.utils.data import Dataset
 from src.dataset.coco import COCO
 from src.dataset.cityscapes import Cityscapes
-
+from src.imageaugmentations import ToTensor
+import cv2
 
 class CityscapesCocoMix(Dataset):
 
@@ -24,6 +25,8 @@ class CityscapesCocoMix(Dataset):
         self.coco = COCO(root=coco_root, split=self.coco_split, proxy_size=int(subsampling_factor*len(self.cs)))
         self.images = self.cs.images + self.coco.images
         self.targets = self.cs.targets + self.coco.targets
+        # self.images = self.coco.images + self.cs.images 
+        # self.targets = self.coco.targets + self.cs.targets 
         self.train_id_out = self.coco.train_id_out
         self.num_classes = self.cs.num_train_ids
         self.mean = self.cs.mean
@@ -33,6 +36,8 @@ class CityscapesCocoMix(Dataset):
     def __getitem__(self, i):
         """Return raw image, ground truth in PIL format and absolute path of raw image as string"""
         image = Image.open(self.images[i]).convert('RGB')
+        # if i == 0:
+        #     image.save("/NAS2020/Workspaces/DRLGroup/lymao/entropy-maximization-and-meta-classification/original_pic.jpg")
         target = Image.open(self.targets[i]).convert('L')
         if self.transform is not None:
             image, target = self.transform(image, target)

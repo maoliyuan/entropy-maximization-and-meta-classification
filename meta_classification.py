@@ -3,7 +3,7 @@ import time
 import os
 import pickle
 import sys
-
+from sklearn import svm
 import numpy as np
 
 from config import config_evaluation_setup
@@ -31,6 +31,9 @@ def metaseg_prepare(params, roots, dataset):
     for i in range(len(dataset)):
         inf.probs_gt_save(i)
 
+def moment_prepare(params, roots, dataset):
+    inf = inference(params, roots, dataset, dataset.num_eval_classes)
+    inf.moment_gt_save()
 
 def entropy_segments_mask(probs, t):
     """Generate OoD prediction mask from softmax probabilities"""
@@ -183,6 +186,41 @@ class meta_classification(object):
         fp_after = np.sum([metrics["kick"] == 1]) - np.sum(np.array(metrics["iou0"])[metrics["kick"] == 1])
         return fn_after, fp_before, fp_after
 
+class moment_SVM(object):
+    """
+    Perform meta classification with the aid of logistic regressions in order to remove false positive OoD predictions
+    """
+    def __init__(self, params, roots):
+        self.epoch = params.val_epoch
+        self.alpha = params.pareto_alpha
+        self.net = roots.model_name
+        self.moment_root = os.path.join(roots.io_root, "moment")
+        if self.epoch == 0:
+            pattern = "baseline"
+            self.moment_load_dir = os.path.join(self.moment_root, params.optim_target, pattern)
+        else:
+            pattern = "epoch_" + str(self.epoch) + "_alpha_" + str(self.alpha)
+            self.moment_load_dir = os.path.join(self.moment_root, params.optim_target, pattern)
+        self.moment_file_name = os.path.join(self.moment_load_dir, "moment_" + str(params.svm_points_num) + ".pkl")
+        self.SVM_file_name = os.path.join(self.moment_load_dir, "SVM_" + str(params.svm_points_num) + ".pkl")
+
+    def fit_and_save(self):
+        data_dict = pickle.load(open(self.moment_file_name, "rb"))
+        data = data_dict["data"]
+        label = data_dict["label"]
+        self.SVM = svm.LinearSVC()
+        self.SVM.fit(data, label)
+        output = open(self.SVM_file_name, 'wb')
+        pickle.dump(self.SVM, output)
+        print("file stored:", self.SVM_file_name)
+        output.close()
+
+    def load(self):
+        self.SVM = pickle.load(open(self.SVM_file_name, "rb"))
+        print("SVM loaded:", self.SVM_file_name)
+
+    def pred(self, pixel_moment):
+        return self.SVM.predict(pixel_moment)
 
 def main(args):
     config = config_evaluation_setup(args)
@@ -194,6 +232,12 @@ def main(args):
     """Perform Meta Classification"""
     if not args["metaseg_prepare"] and not args["segment_search"] and not args["fp_removal"]:
         args["metaseg_prepare"] = args["segment_search"] = args["fp_removal"] = True
+    if args["moment_prepare"]:
+        print("PREPARE MOMENT INPUT")
+        moment_prepare(config.params, config.roots, datloader)
+    if args["SVM_train_and_save"]:
+        print("FIT SVM")
+        moment_SVM(config.params, config.roots).fit_and_save()
     if args["metaseg_prepare"]:
         print("PREPARE METASEG INPUT")
         metaseg_prepare(config.params, config.roots, datloader)
@@ -218,7 +262,9 @@ if __name__ == '__main__':
     parser.add_argument("-epoch", "--val_epoch", nargs="?", type=int)
     parser.add_argument("-alpha", "--pareto_alpha", nargs="?", type=float)
     parser.add_argument("-threshold", "--entropy_threshold", nargs="?", type=float)
-    parser.add_argument("-prepare", "--metaseg_prepare", action='store_true')
-    parser.add_argument("-segment", "--segment_search", action='store_true')
+    parser.add_argument("-prepare", "--metaseg_prepare", default=False, action='store_true')
+    parser.add_argument("-moment", "--moment_prepare", default=False, action='store_true')
+    parser.add_argument("-SVM", "--SVM_train_and_save", default=False, action='store_true')
+    parser.add_argument("-segment", "--segment_search", default=False, action='store_true')
     parser.add_argument("-removal", "--fp_removal", action='store_true')
     main(vars(parser.parse_args()))

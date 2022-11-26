@@ -1,6 +1,6 @@
 import os
 import sys
-
+import pickle
 import numpy as np
 import h5py
 import torch
@@ -8,7 +8,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from PIL import Image
-
+from scipy import stats
 from src.model.deepv3 import DeepWV3Plus
 from src.model.DualGCNNet import DualSeg_res50
 
@@ -33,7 +33,7 @@ def load_network(model_name, num_classes, ckpt_path=None, train=False):
         return network.train()
     else:
         print("... ok")
-        return network.eval()
+        return network.train()
 
 
 def prediction(net, image):
@@ -46,7 +46,6 @@ def prediction(net, image):
     out = F.softmax(out, 1)
     return out.numpy()
 
-
 class inference(object):
 
     def __init__(self, params, roots, loader, num_classes=None, init_net=True):
@@ -54,20 +53,28 @@ class inference(object):
         self.alpha = params.pareto_alpha
         self.batch_size = params.batch_size
         self.model_name = roots.model_name
+        self.moment_oder = params.moment_order
+        self.moment_num = params.moment_num
+        self.moment_weight = params.moment_weight
+        self.svm_points_num = params.svm_points_num
+        self.max_batch_size = params.max_batch_size
         self.batch = 0
         self.batch_max = int(len(loader) / self.batch_size) + (len(loader) % self.batch_size > 0)
         self.loader = loader
         self.batchloader = iter(DataLoader(loader, batch_size=self.batch_size, shuffle=False))
         self.probs_root = os.path.join(roots.io_root, "probs")
+        self.moment_root = os.path.join(roots.io_root, "moment")
 
         if self.epoch == 0:
             pattern = "baseline"
             ckpt_path = roots.init_ckpt
-            self.probs_load_dir = os.path.join(self.probs_root, pattern)
+            self.probs_load_dir = os.path.join(self.probs_root, params.optim_target, pattern)
+            self.moment_load_dir = os.path.join(self.moment_root, params.optim_target, pattern)
         else:
             pattern = "epoch_" + str(self.epoch) + "_alpha_" + str(self.alpha)
             basename = self.model_name + "_" + pattern + ".pth"
-            self.probs_load_dir = os.path.join(self.probs_root, pattern)
+            self.probs_load_dir = os.path.join(self.probs_root, params.optim_target, pattern)
+            self.moment_load_dir = os.path.join(self.moment_root, params.optim_target, pattern)
             ckpt_path = os.path.join(roots.weights_dir, basename)
         if init_net and num_classes is not None:
             self.net = load_network(self.model_name, num_classes, ckpt_path)
@@ -128,6 +135,78 @@ class inference(object):
         im_path = self.loader.images[i]
         return probs, gt_train, gt_label, im_path
 
+    def moment_gt_calc(self, i):
+        x, y = self.loader[i]
+        npy = np.array(y)
+        id_dist = []
+        ood_dist =[]
+        if np.sum(npy == 2) >= 1e4:
+            print("BEGIN CALCULATE MOMENT FOR ONE IMAGE")
+            for _ in range(self.moment_num // self.max_batch_size):
+                probs = np.transpose(prediction(self.net, torch.stack([x for _ in range(self.max_batch_size)], dim=0)), (2, 3, 0, 1))
+                ood_probs = np.random.permutation(probs[npy == 2])[0: int(1e4)]
+                id_probs = np.random.permutation(probs[npy == 1])[0: int(1e4)]
+                ood_dist.append(ood_probs)
+                id_dist.append(id_probs)
+            return [np.concatenate(id_dist, axis=1)], [np.concatenate(ood_dist, axis=1)]
+        else:
+            return id_dist, ood_dist
+
+    def moment_test_calc(self, i):
+        x, y = self.loader[i]
+        npy = np.array(y)
+        id_dist = []
+        ood_dist =[]
+        for _ in range(self.moment_num // self.max_batch_size):
+            probs = np.transpose(prediction(self.net, torch.stack([x for _ in range(self.max_batch_size)], dim=0)), (2, 3, 0, 1))
+            ood_dist.append(probs[npy == 2])
+            id_dist.append(probs[npy == 1])
+        id_dist = np.concatenate(id_dist, axis=1)
+        ood_dist = np.concatenate(ood_dist, axis=1)
+        all_pixel_dist = np.concatenate([id_dist, ood_dist], axis=0)
+        label = np.concatenate([np.ones(id_dist.shape[0]), np.zeros(ood_dist.shape[0])])
+        high_moment = np.transpose(stats.moment(all_pixel_dist, moment=list(range(2, self.moment_oder+1)), axis=1), (1, 0, 2)).reshape([all_pixel_dist.shape[0], -1])
+        mean = np.mean(all_pixel_dist, axis=1)
+        entropy = np.expand_dims(np.sum(mean * np.log(mean), axis=1), axis=1)
+        moment = 2 * np.concatenate([(1 - self.moment_weight)*entropy, self.moment_weight*mean, self.moment_weight*high_moment], axis=1)
+        return moment, label
+
+    def moment_gt_save(self, save_dir=None):
+        if save_dir is None:
+            save_dir = self.moment_load_dir
+        if not os.path.exists(save_dir):
+            print("Create directory:", save_dir)
+            os.makedirs(save_dir)
+        total_id_dist = []
+        total_ood_dist = []
+        for i in range(len(self.loader)):
+            if(len(total_id_dist) >= self.svm_points_num // 1e4):
+                break
+            single_id_dist, single_ood_dist = self.moment_gt_calc(i)
+            total_id_dist += single_id_dist
+            total_ood_dist += single_ood_dist
+        total_id_dist = np.concatenate(total_id_dist, axis=0)
+        total_ood_dist = np.concatenate(total_ood_dist, axis=0)
+        id_high_moment = np.transpose(stats.moment(total_id_dist, moment=list(range(2, self.moment_oder+1)), axis=1), (1, 0, 2)).reshape([total_id_dist.shape[0], -1])
+        ood_high_moment = np.transpose(stats.moment(total_ood_dist, moment=list(range(2, self.moment_oder+1)), axis=1), (1, 0, 2)).reshape([total_ood_dist.shape[0], -1])
+        id_mean = np.mean(total_id_dist, axis=1)
+        ood_mean = np.mean(total_ood_dist, axis=1)
+        id_entropy = np.expand_dims(np.sum(id_mean * np.log(id_mean), axis=1), axis=1)
+        ood_entropy = np.expand_dims(np.sum(ood_mean * np.log(ood_mean), axis=1), axis=1)
+        id_moment = 2 * np.concatenate([(1 - self.moment_weight)*id_entropy, self.moment_weight*id_mean, self.moment_weight*id_high_moment], axis=1)
+        ood_moment = 2 * np.concatenate([(1 - self.moment_weight)*ood_entropy, self.moment_weight*ood_mean, self.moment_weight*ood_high_moment], axis=1)
+        id_label = np.ones(id_moment.shape[0])
+        ood_label = np.zeros(ood_moment.shape[0])
+        moment_for_svm = np.concatenate([id_moment, ood_moment], axis=0)
+        label_for_svm = np.concatenate([id_label, ood_label])
+        file_name = os.path.join(save_dir, "moment_" + str(self.svm_points_num) + ".pkl")
+        data_dict = {}
+        data_dict["data"] = moment_for_svm
+        data_dict["label"] = label_for_svm
+        output = open(file_name, 'wb')
+        pickle.dump(data_dict, output)
+        print("file stored:", file_name)
+        output.close()
 
 def probs_gt_load(i, load_dir):
     try:

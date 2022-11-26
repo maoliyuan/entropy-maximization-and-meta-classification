@@ -10,14 +10,14 @@ MODELS      = ["DeepLabV3+_WideResNet38", "DualGCNNet_res50"]
 TRAINSET    = TRAINSETS[0]
 VALSET      = VALSETS[0]
 MODEL       = MODELS[0]
-IO          = "./chan/io/ood_detection/"
+IO          = "../chan/io/ood_detection/"
 
 class cs_coco_roots:
     """
     OoD training roots for Cityscapes + COCO mix
     """
     model_name  = MODEL
-    init_ckpt   = os.path.join("./chan/io/cityscapes/weights/", model_name + ".pth")
+    init_ckpt   = os.path.join("../chan/io/cityscapes/weights/", model_name + ".pth")
     cs_root     = "./datasets/cityscapes/"
     coco_root   = "./datasets/COCO/2017"
     io_root     = IO + "meta_ood_" + model_name
@@ -29,7 +29,7 @@ class laf_roots:
     LostAndFound config class
     """
     model_name = MODEL
-    init_ckpt = os.path.join("./chan/io/cityscapes/weights/", model_name + ".pth")
+    init_ckpt = os.path.join("../chan/io/cityscapes/weights/", model_name + ".pth")
     eval_dataset_root = "./datasets/lost_and_found/"
     eval_sub_dir = "laf_eval"
     io_root = os.path.join(IO + "meta_ood_" + model_name, eval_sub_dir)
@@ -41,7 +41,7 @@ class fs_roots:
     Fishyscapes config class
     """
     model_name = MODEL
-    init_ckpt = os.path.join("./chan/io/cityscapes/weights/", model_name + ".pth")
+    init_ckpt = os.path.join("../chan/io/cityscapes/weights/", model_name + ".pth")
     eval_dataset_root = "./datasets/fishyscapes/"
     eval_sub_dir = "fs_eval"
     io_root = os.path.join(IO + "meta_ood_" + model_name, eval_sub_dir)
@@ -53,14 +53,23 @@ class params:
     Set pipeline parameters
     """
     training_starting_epoch = 0
-    num_training_epochs     = 1
+    num_training_epochs     = 10
     pareto_alpha            = 0.9
+    delta_rate              = 10
+    FGSM_eps                = 0.001
     ood_subsampling_factor  = 0.1
     learning_rate           = 1e-5
     crop_size               = 480
-    val_epoch               = num_training_epochs
+    val_epoch               = 8
+    optim_target            = 'entropy' #or 'logit'
     batch_size              = 16
+    max_batch_size          = 16 # gpu num * 2
     entropy_threshold       = 0.7
+    moment_num              = 128
+    svm_points_num          = 1e5
+    moment_order            = 4
+    moment_weight           = 0.5
+    SVM_eval_subsize        = 100
 
 
 #########################################################################
@@ -89,6 +98,7 @@ class config_training_setup(object):
                     rep = getattr(self.roots, attr).replace(tmp, args["MODEL"])
                     setattr(self.roots, attr, rep)
         self.params = params
+        self.roots.weights_dir = os.path.join(self.roots.weights_dir, params.optim_target + '/')
         params_attr = [attr for attr in dir(self.params) if not attr.startswith('__')]
         for attr in params_attr:
             if attr in args:
@@ -118,6 +128,7 @@ class config_evaluation_setup(object):
             self.roots = fs_roots
             self.dataset = Fishyscapes
         self.params = params
+        self.roots.weights_dir = os.path.join(self.roots.weights_dir, params.optim_target + '/')
         params_attr = [attr for attr in dir(self.params) if not attr.startswith('__')]
         for attr in params_attr:
             if attr in args:

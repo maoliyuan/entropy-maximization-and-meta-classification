@@ -48,6 +48,13 @@ def encode_target(target, pareto_alpha, num_classes, ignore_train_ind, ood_ind=2
     enc = enc.permute(0, 3, 1, 2).contiguous()
     return enc
 
+def encode_target_logits(target, pareto_alpha, num_classes, ignore_train_ind, ood_ind=254):
+    npy = target.numpy()
+    enc = np.ones_like(npy) * (1 - pareto_alpha)
+    enc[np.isin(npy, ood_ind)] = -1 * pareto_alpha
+    enc[np.isin(npy, ignore_train_ind)] = 0
+    enc = torch.from_numpy(enc)
+    return enc
 
 def training_routine(config):
     """Start OoD Training"""
@@ -81,27 +88,39 @@ def training_routine(config):
         dataloader = DataLoader(trainloader, batch_size=params.batch_size, shuffle=True, drop_last=True)
         i = 0
         loss = None
+        save_basename = roots.model_name + "_epoch_" + str(epoch) + "_alpha_" + str(params.pareto_alpha) + ".pth"
         for b_idx, (x, target) in enumerate(dataloader):
             optimizer.zero_grad()
-            y = encode_target(target=target, pareto_alpha=params.pareto_alpha, num_classes=dataset.num_classes,
-                              ignore_train_ind=dataset.void_ind, ood_ind=dataset.train_id_out).cuda()
             logits = network(x.cuda())
-            loss = cross_entropy(logits, y)
+            if(params.optim_target == 'entropy'):
+                y = encode_target(target=target, pareto_alpha=params.pareto_alpha, num_classes=dataset.num_classes,
+                                ignore_train_ind=dataset.void_ind, ood_ind=dataset.train_id_out).cuda()
+                loss = cross_entropy(logits, y)
+            elif(params.optim_target == 'logit'):
+                y = encode_target_logits(target=target, pareto_alpha=params.pareto_alpha, num_classes=dataset.num_classes,
+                                ignore_train_ind=dataset.void_ind, ood_ind=dataset.train_id_out).cuda()
+                max_logits = torch.max(logits, dim=1).values
+                loss = -1 * torch.mean(max_logits * y)
+            else:
+                raise ValueError('wrong optim target: {}'.format(params.optim_target))
             loss.backward()
             optimizer.step()
-            print('{} Loss: {}'.format(i, loss.item()))
+            if(params.optim_target == 'entropy'):
+                print('{} Entropy: {}'.format(i, loss.item()))
+            if(params.optim_target == 'logit'):
+                entropy = cross_entropy(logits, encode_target(target=target, pareto_alpha=params.pareto_alpha, num_classes=dataset.num_classes, ignore_train_ind=dataset.void_ind, ood_ind=dataset.train_id_out).cuda())
+                print('{} Entropy: {}'.format(i, entropy.item()))
             i += 1
-            if((b_idx + 1) % 100 == 0):
-                """Save model state"""
-                save_basename = roots.model_name + "_batch_" + str(b_idx + 1) + "_alpha_" + str(params.pareto_alpha) + ".pth"
-                print('Saving checkpoint', os.path.join(roots.weights_dir, save_basename))
-                torch.save({
-                    'epoch': epoch + 1,
-                    'batch': b_idx + 1,
-                    'state_dict': network.state_dict(),
-                    'optimizer_state_dict': optimizer.state_dict(),
-                    'loss': loss,
-                }, os.path.join(roots.weights_dir, save_basename))
+        """Save model state"""
+        save_basename = roots.model_name + "_epoch_" + str(epoch) + "_alpha_" + str(params.pareto_alpha) + ".pth"
+        print('Saving checkpoint', os.path.join(roots.weights_dir, save_basename))
+        torch.save({
+            'epoch': epoch + 1,
+            'batch': b_idx + 1,
+            'state_dict': network.state_dict(),
+            'optimizer_state_dict': optimizer.state_dict(),
+            'loss': loss,
+        }, os.path.join(roots.weights_dir, save_basename))
         torch.cuda.empty_cache()
 
     end = time.time()

@@ -13,7 +13,8 @@ from src.model_utils import inference
 from scipy.stats import entropy
 from src.calc import calc_precision_recall, calc_sensitivity_specificity
 from src.helper import concatenate_metrics
-from meta_classification import meta_classification
+from meta_classification import meta_classification, moment_SVM
+from sklearn.metrics import f1_score, precision_score
 
 
 class eval_pixels(object):
@@ -26,6 +27,7 @@ class eval_pixels(object):
         self.epoch = params.val_epoch
         self.alpha = params.pareto_alpha
         self.batch_size = params.batch_size
+        self.SVM_eval_subsize = params.SVM_eval_subsize
         self.roots = roots
         self.dataset = dataset
         self.save_dir_data = os.path.join(self.roots.io_root, "results/entropy_counts_per_pixel")
@@ -95,6 +97,34 @@ class eval_pixels(object):
         print("AUPRC:", auprc)
         return auroc, fpr95, auprc
 
+    def moment_SVM_classify_on_subset(self, datloader=None):
+        if datloader is None:
+            print("Please, specify dataset loader")
+            exit()
+        loader = datloader
+        label_list = []
+        pred_list = []
+        inf = inference(self.params, self.roots, loader, self.dataset.num_eval_classes)
+        SVM = moment_SVM(self.params, self.roots)
+        SVM.load()
+        for i in range(len(loader)):
+            x, y = loader[i]
+            npy = np.array(y)
+            if np.sum(npy == 2) > 1e4 and len(label_list) < self.SVM_eval_subsize:
+                pixel_moment, label = inf.moment_test_calc(i)
+                pred = SVM.pred(pixel_moment)
+                label_list.append(label)
+                pred_list.append(pred)
+                print("\rImages Processed: {}/{}".format(len(label_list), self.SVM_eval_subsize), end=' ')
+                print("CURRENT IMAGE F1 SCORE: ", f1_score(label, pred))
+                print("CURRENT IMAGE PRECISION SCORE: ", precision_score(label, pred))
+                print("CURRENT IMAGE FALSE POSITIVE RATE", np.sum((label + pred == 1) * (label == 0)) / np.sum(label == 0))
+        total_label = np.concatenate(label_list)
+        total_pred = np.concatenate(pred_list)
+        score = f1_score(total_label, total_pred)
+        print("F1 SCORE:", score)
+        print("PRECISION SCORE:", precision_score(total_label, total_pred))
+        print("FALSE POSITIVE RATE", np.sum((total_label + total_pred == 1) * (total_label == 0)) / np.sum(total_label == 0))
 
 def oodd_metrics_segment(params, roots, dataset, metaseg_dir=None):
     """
@@ -154,6 +184,10 @@ def main(args):
         print("\nPIXEL-LEVEL EVALUATION")
         eval_pixels(config.params, config.roots, config.dataset).oodd_metrics_pixel(datloader=datloader)
 
+    if args["pixel_eval_moment"]:
+        print("\nPIXEL-LEVEL EVALUATION BY MOMENT")
+        eval_pixels(config.params, config.roots, config.dataset).moment_SVM_classify_on_subset(datloader=datloader)
+
     if args["segment_eval"]:
         print("\nSEGMENT-LEVEL EVALUATION")
         oodd_metrics_segment(config.params, config.roots, datloader)
@@ -172,6 +206,7 @@ if __name__ == '__main__':
     parser.add_argument("-model", "--MODEL", nargs="?", type=str)
     parser.add_argument("-epoch", "--val_epoch", nargs="?", type=int)
     parser.add_argument("-alpha", "--pareto_alpha", nargs="?", type=float)
-    parser.add_argument("-pixel", "--pixel_eval", action='store_true')
-    parser.add_argument("-segment", "--segment_eval", action='store_true')
+    parser.add_argument("-pixel", "--pixel_eval", default=False, action='store_true')
+    parser.add_argument("-moment", "--pixel_eval_moment", default=False, action='store_true')
+    parser.add_argument("-segment", "--segment_eval", default=False, action='store_true')
     main(vars(parser.parse_args()))
