@@ -29,11 +29,11 @@ def load_network(model_name, num_classes, ckpt_path=None, train=False):
         network.load_state_dict(torch.load(ckpt_path)['state_dict'], strict=False)
     network = network.cuda()
     if train:
-        print("... ok")
+        print("...train mode ok")
         return network.train()
     else:
-        print("... ok")
-        return network.train()
+        print("...eval mode ok")
+        return network.eval()
 
 
 def prediction(net, image):
@@ -48,7 +48,7 @@ def prediction(net, image):
 
 class inference(object):
 
-    def __init__(self, params, roots, loader, num_classes=None, init_net=True):
+    def __init__(self, params, roots, loader, num_classes=None, init_net=True, moment=False):
         self.epoch = params.val_epoch
         self.alpha = params.pareto_alpha
         self.batch_size = params.batch_size
@@ -57,7 +57,7 @@ class inference(object):
         self.moment_num = params.moment_num
         self.moment_weight = params.moment_weight
         self.svm_points_num = params.svm_points_num
-        self.max_batch_size = params.max_batch_size
+        self.max_batch_size_for_moment = params.max_batch_size_for_moment
         self.batch = 0
         self.batch_max = int(len(loader) / self.batch_size) + (len(loader) % self.batch_size > 0)
         self.loader = loader
@@ -71,13 +71,17 @@ class inference(object):
             self.probs_load_dir = os.path.join(self.probs_root, params.optim_target, pattern)
             self.moment_load_dir = os.path.join(self.moment_root, params.optim_target, pattern)
         else:
-            pattern = "epoch_" + str(self.epoch) + "_alpha_" + str(self.alpha)
+            pattern = "epoch_" + str(self.epoch) + "_alpha_" + str(self.alpha) + "_target_" + str(params.optim_target) + "_embedding_" + str(params.embedding_img_interval)
             basename = self.model_name + "_" + pattern + ".pth"
             self.probs_load_dir = os.path.join(self.probs_root, params.optim_target, pattern)
             self.moment_load_dir = os.path.join(self.moment_root, params.optim_target, pattern)
             ckpt_path = os.path.join(roots.weights_dir, basename)
         if init_net and num_classes is not None:
-            self.net = load_network(self.model_name, num_classes, ckpt_path)
+            if moment == False:
+                self.net = load_network(self.model_name, num_classes, ckpt_path)
+            else:
+                print("======== you are using non-diterministic net for moment!! ========")
+                self.net = load_network(self.model_name, num_classes, ckpt_path, True)
 
     def probs_gt_load(self, i, load_dir=None):
         if load_dir is None:
@@ -103,8 +107,10 @@ class inference(object):
         if not os.path.exists(save_dir):
             print("Create directory:", save_dir)
             os.makedirs(save_dir)
-        probs, gt_train, gt_label, im_path = self.prob_gt_calc(i)
         file_name = os.path.join(save_dir, "probs" + str(i) + ".hdf5")
+        if os.path.exists(file_name):
+            return
+        probs, gt_train, gt_label, im_path = self.prob_gt_calc(i)
         f = h5py.File(file_name, "w")
         f.create_dataset("probabilities", data=probs)
         f.create_dataset("gt_train_ids", data=gt_train)
@@ -140,12 +146,13 @@ class inference(object):
         npy = np.array(y)
         id_dist = []
         ood_dist =[]
-        if np.sum(npy == 2) >= 1e4:
+        id_labels = list(range(19))
+        if np.sum(npy == 255) >= 5e4:
             print("BEGIN CALCULATE MOMENT FOR ONE IMAGE")
-            for _ in range(self.moment_num // self.max_batch_size):
-                probs = np.transpose(prediction(self.net, torch.stack([x for _ in range(self.max_batch_size)], dim=0)), (2, 3, 0, 1))
-                ood_probs = np.random.permutation(probs[npy == 2])[0: int(1e4)]
-                id_probs = np.random.permutation(probs[npy == 1])[0: int(1e4)]
+            for _ in range(self.moment_num // self.max_batch_size_for_moment + 1):
+                probs = np.transpose(prediction(self.net, torch.stack([x for _ in range(self.max_batch_size_for_moment)], dim=0)), (2, 3, 0, 1))
+                ood_probs = np.random.permutation(probs[npy == 255])[0: int(5e4)]
+                id_probs = np.random.permutation(probs[np.isin(npy, id_labels)])[0: int(5e4)]
                 ood_dist.append(ood_probs)
                 id_dist.append(id_probs)
             return [np.concatenate(id_dist, axis=1)], [np.concatenate(ood_dist, axis=1)]
@@ -157,8 +164,8 @@ class inference(object):
         npy = np.array(y)
         id_dist = []
         ood_dist =[]
-        for _ in range(self.moment_num // self.max_batch_size):
-            probs = np.transpose(prediction(self.net, torch.stack([x for _ in range(self.max_batch_size)], dim=0)), (2, 3, 0, 1))
+        for _ in range(self.moment_num // self.max_batch_size_for_moment + 1):
+            probs = np.transpose(prediction(self.net, torch.stack([x for _ in range(self.max_batch_size_for_moment)], dim=0)), (2, 3, 0, 1))
             ood_dist.append(probs[npy == 2])
             id_dist.append(probs[npy == 1])
         id_dist = np.concatenate(id_dist, axis=1)
@@ -180,7 +187,7 @@ class inference(object):
         total_id_dist = []
         total_ood_dist = []
         for i in range(len(self.loader)):
-            if(len(total_id_dist) >= self.svm_points_num // 1e4):
+            if(len(total_id_dist) >= self.svm_points_num // 5e4):
                 break
             single_id_dist, single_ood_dist = self.moment_gt_calc(i)
             total_id_dist += single_id_dist

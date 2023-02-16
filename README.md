@@ -1,4 +1,8 @@
-
+##### These are the origin repository's README file, please make sure you have followed these !!! #####
+##### These are the origin repository's README file, please make sure you have followed these !!! #####
+##### These are the origin repository's README file, please make sure you have followed these !!! #####
+##### These are the origin repository's README file, please make sure you have followed these !!! #####
+##### These are the origin repository's README file, please make sure you have followed these !!! #####
 # Entropy Maximization and Meta Classification for Out-of-Distribution Detection in Semantic Segmentation  
   
 **Abstract** Deep neural networks (DNNs) for the semantic segmentation of images are usually trained to operate on a predefined closed set of object classes. This is in contrast to the "open world" setting where DNNs are envisioned to be deployed to. From a functional safety point of view, the ability to detect so-called "out-of-distribution" (OoD) samples, i.e., objects outside of a DNN's semantic space, is crucial for many applications such as automated driving.
@@ -55,3 +59,32 @@ python ood_training.py -h
   
 If no command-line options are provided, the settings in ```config.py``` are applied.
 
+##### These are part of our code and how to use it !!!! #####
+##### These are part of our code and how to use it !!!! #####
+##### These are part of our code and how to use it !!!! #####
+##### These are part of our code and how to use it !!!! #####
+##### These are part of our code and how to use it !!!! #####
+More preparation:
+pip install -U scikit-learn
+
+## Augmented data path
+All the augmmented data are stored in ./datasets/cs_coco_embedding, but before generating the augmented data please put cropped COCO images in this directory ./datasets/cropped_coco , and run python src/dataset/cs_coco_embedding.py to generate augmented data.
+
+## Train with augmented data
+Please choose the ratio of augmented data that you want to mix with origin data. embedding_img_interval in config.py indicates the frequency of origin data that replaced by augmented data, i.e. embedding_img_interval=1 means every origin data would be replaced by augmented data.
+
+## optim target
+We support another training method with max logit, which might be helpful if you want to use this model as the front-end model of SML algorithm.
+if you want to train this kind of model, simply change optim_target in config.py from 'entropy' to 'logit'
+
+## OODMC parameters
+Here are the meanings of all the parameters of OODMC and how to correctly use them to run OODMC
+moment_num              default 128         corresponds to the number of samples you want to use to calculate statistic information of logits
+svm_points_num          default 5e5         the number of total pixels you want to train the classifier (here is SVM)
+moment_order            default 4           the number of orders you want to calculate for logits' moment, each order's moment is an array of C bits(C is classs num)
+moment_weight           default 0.5         since OODMC also use entropy, which dosen't belong to any order, this is coefficient that measures how much it rely on it
+SVM_eval_subsize        default 100         OODMC is extremely slow if your GPU number is small (less than 4*2080Ti is small), so this is how many picture you want to analyze
+
+Way to use OODMC
+python meta_classification.py -moment -SVM
+python evaluation,py -moment

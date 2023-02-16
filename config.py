@@ -17,7 +17,7 @@ class cs_coco_roots:
     OoD training roots for Cityscapes + COCO mix
     """
     model_name  = MODEL
-    init_ckpt   = os.path.join("../chan/io/cityscapes/weights/", model_name + ".pth")
+    init_ckpt   = os.path.join("/home/lymao/", model_name + ".pth")
     cs_root     = "./datasets/cityscapes/"
     coco_root   = "./datasets/COCO/2017"
     io_root     = IO + "meta_ood_" + model_name
@@ -29,8 +29,8 @@ class laf_roots:
     LostAndFound config class
     """
     model_name = MODEL
-    init_ckpt = os.path.join("../chan/io/cityscapes/weights/", model_name + ".pth")
-    eval_dataset_root = "./datasets/lost_and_found/"
+    init_ckpt = os.path.join("/home/lymao/", model_name + ".pth")
+    eval_dataset_root = "/home/lymao/lost_and_found/"
     eval_sub_dir = "laf_eval"
     io_root = os.path.join(IO + "meta_ood_" + model_name, eval_sub_dir)
     weights_dir = os.path.join(io_root, "..", "weights/")
@@ -60,16 +60,17 @@ class params:
     ood_subsampling_factor  = 0.1
     learning_rate           = 1e-5
     crop_size               = 480
-    val_epoch               = 8
-    optim_target            = 'entropy' #or 'logit'
+    val_epoch               = 4
+    optim_target            = 'entropy' # 'entropy' or 'logit'
     batch_size              = 16
-    max_batch_size          = 16 # gpu num * 2
+    max_batch_size_for_moment = 16 # gpu num * 2
     entropy_threshold       = 0.7
     moment_num              = 128
-    svm_points_num          = 1e5
+    svm_points_num          = 5e5
     moment_order            = 4
     moment_weight           = 0.5
     SVM_eval_subsize        = 100
+    embedding_img_interval  = 1
 
 
 #########################################################################

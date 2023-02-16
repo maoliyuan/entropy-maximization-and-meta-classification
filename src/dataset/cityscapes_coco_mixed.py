@@ -25,8 +25,6 @@ class CityscapesCocoMix(Dataset):
         self.coco = COCO(root=coco_root, split=self.coco_split, proxy_size=int(subsampling_factor*len(self.cs)))
         self.images = self.cs.images + self.coco.images
         self.targets = self.cs.targets + self.coco.targets
-        # self.images = self.coco.images + self.cs.images 
-        # self.targets = self.coco.targets + self.cs.targets 
         self.train_id_out = self.coco.train_id_out
         self.num_classes = self.cs.num_train_ids
         self.mean = self.cs.mean

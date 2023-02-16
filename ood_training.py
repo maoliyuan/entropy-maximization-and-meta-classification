@@ -11,6 +11,7 @@ from config import config_training_setup
 from src.imageaugmentations import Compose, Normalize, ToTensor, RandomCrop, RandomHorizontalFlip
 from src.model_utils import load_network
 from torch.utils.data import DataLoader
+from src.dataset.cs_coco_embedding import CS_COCO_Embedding
 
 
 def cross_entropy(logits, targets):
@@ -73,23 +74,28 @@ def training_routine(config):
                                ckpt_path=roots.init_ckpt, train=True)
     else:
         basename = roots.model_name + "_epoch_" + str(start_epoch) \
-                   + "_alpha_" + str(params.pareto_alpha) + ".pth"
+                   + "_alpha_" + str(params.pareto_alpha) + "_target_" + str(params.optim_target) + "_embedding_" + str(params.embedding_img_interval) + ".pth"
         network = load_network(model_name=roots.model_name, num_classes=dataset.num_classes,
                                ckpt_path=os.path.join(roots.weights_dir, basename), train=True)
 
     transform = Compose([RandomHorizontalFlip(), RandomCrop(params.crop_size), ToTensor(),
                          Normalize(dataset.mean, dataset.std)])
+    transform_embedding = Compose([RandomHorizontalFlip(), RandomCrop(params.crop_size), ToTensor(), Normalize(dataset.mean, dataset.std)])
 
     for epoch in range(start_epoch, start_epoch + epochs):
         """Perform one epoch of training"""
         print('\nEpoch {}/{}'.format(epoch + 1, start_epoch + epochs))
         optimizer = optim.Adam(network.parameters(), lr=params.learning_rate)
         trainloader = config.dataset('train', transform, roots.cs_root, roots.coco_root, params.ood_subsampling_factor)
+        trainloader_embedding = CS_COCO_Embedding(transform=transform_embedding)
         dataloader = DataLoader(trainloader, batch_size=params.batch_size, shuffle=True, drop_last=True)
+        dataloader_embedding = iter(DataLoader(trainloader_embedding, batch_size=params.batch_size, shuffle=True, drop_last=True))
         i = 0
         loss = None
         save_basename = roots.model_name + "_epoch_" + str(epoch) + "_alpha_" + str(params.pareto_alpha) + ".pth"
         for b_idx, (x, target) in enumerate(dataloader):
+            if b_idx % params.embedding_img_interval == 0:
+                (x, target) = next(dataloader_embedding)
             optimizer.zero_grad()
             logits = network(x.cuda())
             if(params.optim_target == 'entropy'):
@@ -112,7 +118,7 @@ def training_routine(config):
                 print('{} Entropy: {}'.format(i, entropy.item()))
             i += 1
         """Save model state"""
-        save_basename = roots.model_name + "_epoch_" + str(epoch) + "_alpha_" + str(params.pareto_alpha) + ".pth"
+        save_basename = roots.model_name + "_epoch_" + str(epoch + 1) + "_alpha_" + str(params.pareto_alpha) + "_target_" + str(params.optim_target) + "_embedding_" + str(params.embedding_img_interval) + ".pth"
         print('Saving checkpoint', os.path.join(roots.weights_dir, save_basename))
         torch.save({
             'epoch': epoch + 1,

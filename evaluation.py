@@ -36,7 +36,7 @@ class eval_pixels(object):
             self.pattern = "baseline"
             self.save_path_data = os.path.join(self.save_dir_data, "baseline.p")
         else:
-            self.pattern = "epoch_" + str(self.epoch) + "_alpha_" + str(self.alpha)
+            self.pattern = "epoch_" + str(self.epoch) + "_alpha_" + str(self.alpha) + "_target_" + str(params.optim_target) + "_embedding_" + str(params.embedding_img_interval)
             self.save_path_data = os.path.join(self.save_dir_data, self.pattern + ".p")
 
     def counts(self, loader, num_bins=100, save_path=None, rewrite=False):
@@ -104,13 +104,11 @@ class eval_pixels(object):
         loader = datloader
         label_list = []
         pred_list = []
-        inf = inference(self.params, self.roots, loader, self.dataset.num_eval_classes)
+        inf = inference(self.params, self.roots, loader, self.dataset.num_eval_classes, moment=True)
         SVM = moment_SVM(self.params, self.roots)
         SVM.load()
         for i in range(len(loader)):
-            x, y = loader[i]
-            npy = np.array(y)
-            if np.sum(npy == 2) > 1e4 and len(label_list) < self.SVM_eval_subsize:
+            if len(label_list) < self.SVM_eval_subsize:
                 pixel_moment, label = inf.moment_test_calc(i)
                 pred = SVM.pred(pixel_moment)
                 label_list.append(label)
@@ -137,7 +135,7 @@ def oodd_metrics_segment(params, roots, dataset, metaseg_dir=None):
     if epoch == 0:
         load_subdir = "baseline" + "_t" + str(thresh)
     else:
-        load_subdir = "epoch_" + str(epoch) + "_alpha_" + str(alpha) + "_t" + str(thresh)
+        load_subdir = "epoch_" + str(epoch) + "_alpha_" + str(alpha) + "_target_" + str(params.optim_target) + "_embedding_" + str(params.embedding_img_interval) + "_t" + str(thresh)
     if metaseg_dir is None:
         metaseg_dir = os.path.join(roots.io_root, "metaseg_io")
     try:
@@ -171,8 +169,6 @@ def oodd_metrics_segment(params, roots, dataset, metaseg_dir=None):
 
 def main(args):
     config = config_evaluation_setup(args)
-    if not args["pixel_eval"] and not args["segment_eval"]:
-        args["pixel_eval"] = args["segment_eval"] = True
 
     transform = Compose([ToTensor(), Normalize(config.dataset.mean, config.dataset.std)])
     datloader = config.dataset(root=config.roots.eval_dataset_root, transform=transform)
@@ -180,6 +176,10 @@ def main(args):
 
     """Perform evaluation"""
     print("\nEVALUATE MODEL: ", config.roots.model_name)
+    if args["show_support_vectors"]:
+        print("\nSHOW SUPPORT VECTORS")
+        moment_SVM(config.params, config.roots).show_support_vec()
+
     if args["pixel_eval"]:
         print("\nPIXEL-LEVEL EVALUATION")
         eval_pixels(config.params, config.roots, config.dataset).oodd_metrics_pixel(datloader=datloader)
@@ -208,5 +208,6 @@ if __name__ == '__main__':
     parser.add_argument("-alpha", "--pareto_alpha", nargs="?", type=float)
     parser.add_argument("-pixel", "--pixel_eval", default=False, action='store_true')
     parser.add_argument("-moment", "--pixel_eval_moment", default=False, action='store_true')
+    parser.add_argument("-sup_vec", "--show_support_vectors", default=False, action='store_true')
     parser.add_argument("-segment", "--segment_eval", default=False, action='store_true')
     main(vars(parser.parse_args()))

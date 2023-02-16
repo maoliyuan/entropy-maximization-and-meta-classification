@@ -6,10 +6,10 @@ import sys
 from sklearn import svm
 import numpy as np
 
-from config import config_evaluation_setup
+from config import config_evaluation_setup, config_training_setup
 from src.imageaugmentations import Compose, Normalize, ToTensor
 from src.model_utils import probs_gt_load
-from src.helper import metrics_dump, components_dump, concatenate_metrics, metrics_to_dataset, components_load
+from src.helper import metrics_dump, components_dump, concatenate_metrics, metrics_to_dataset, components_load, get_save_path_metrics_i, get_save_path_components_i
 from src.model_utils import inference
 from multiprocessing import Pool, cpu_count
 from scipy.stats import entropy
@@ -32,7 +32,7 @@ def metaseg_prepare(params, roots, dataset):
         inf.probs_gt_save(i)
 
 def moment_prepare(params, roots, dataset):
-    inf = inference(params, roots, dataset, dataset.num_eval_classes)
+    inf = inference(params, roots, dataset, dataset.cs.num_train_ids, moment=True)
     inf.moment_gt_save()
 
 def entropy_segments_mask(probs, t):
@@ -56,8 +56,8 @@ class compute_metrics(object):
             self.load_dir = os.path.join(roots.io_root, "probs/baseline")
             self.save_subdir = "baseline" + "_t" + str(self.thresh)
         else:
-            self.load_dir = os.path.join(roots.io_root, "probs/epoch_" + str(self.epoch) + "_alpha_" + str(self.alpha))
-            self.save_subdir = "epoch_" + str(self.epoch) + "_alpha_" + str(self.alpha) + "_t" + str(self.thresh)
+            self.load_dir = os.path.join(roots.io_root, "probs/" + params.optim_target + "/epoch_" + str(self.epoch) + "_alpha_" + str(self.alpha) + "_target_" + str(params.optim_target) + "_embedding_" + str(params.embedding_img_interval))
+            self.save_subdir = "epoch_" + str(self.epoch) + "_alpha_" + str(self.alpha) + "_target_" + str(params.optim_target) + "_embedding_" + str(params.embedding_img_interval) + "_t" + str(self.thresh)
         self.num_imgs = len(dataset) if num_imgs is None else num_imgs
         if metaseg_dir is None:
             self.metaseg_dir = os.path.join(roots.io_root, "metaseg_io")
@@ -76,6 +76,8 @@ class compute_metrics(object):
 
     def compute_metrics_pred_i(self, i):
         """Compute metrics for predicted segments in one image"""
+        if os.path.exists(os.path.join(self.metaseg_dir, "metrics", self.save_subdir, "%04d.p" % i)):
+            return
         start_i = time.time()
         probs, gt_train, _, img_path = probs_gt_load(i, load_dir=self.load_dir)
         ent_mask = entropy_segments_mask(probs, self.thresh)
@@ -87,6 +89,8 @@ class compute_metrics(object):
 
     def compute_metrics_gt_i(self, i):
         """Compute metrics for ground truth segments in one image"""
+        if os.path.exists(os.path.join(self.metaseg_dir, "metrics", self.save_subdir+"_gt", "%04d.p" % i)):
+            return
         start_i = time.time()
         probs, gt_train, gt_label, img_path = probs_gt_load(i, load_dir=self.load_dir)
         ent_mask = entropy_segments_mask(probs, self.thresh)
@@ -110,7 +114,7 @@ class meta_classification(object):
         if self.epoch == 0:
             self.load_subdir = "baseline" + "_t" + str(self.thresh)
         else:
-            self.load_subdir = "epoch_" + str(self.epoch) + "_alpha_" + str(self.alpha) + "_t" + str(self.thresh)
+            self.load_subdir = "epoch_" + str(self.epoch) + "_alpha_" + str(self.alpha) + "_target_" + str(params.optim_target) + "_embedding_" + str(params.embedding_img_interval) + "_t" + str(self.thresh)
         if metaseg_dir is None:
             self.metaseg_dir = os.path.join(roots.io_root, "metaseg_io")
         else:
@@ -199,7 +203,7 @@ class moment_SVM(object):
             pattern = "baseline"
             self.moment_load_dir = os.path.join(self.moment_root, params.optim_target, pattern)
         else:
-            pattern = "epoch_" + str(self.epoch) + "_alpha_" + str(self.alpha)
+            pattern = "epoch_" + str(self.epoch) + "_alpha_" + str(self.alpha) + "_target_" + str(params.optim_target) + "_embedding_" + str(params.embedding_img_interval)
             self.moment_load_dir = os.path.join(self.moment_root, params.optim_target, pattern)
         self.moment_file_name = os.path.join(self.moment_load_dir, "moment_" + str(params.svm_points_num) + ".pkl")
         self.SVM_file_name = os.path.join(self.moment_load_dir, "SVM_" + str(params.svm_points_num) + ".pkl")
@@ -215,6 +219,10 @@ class moment_SVM(object):
         print("file stored:", self.SVM_file_name)
         output.close()
 
+    def show_support_vec(self):
+        self.SVM = pickle.load(open(self.SVM_file_name, "rb"))
+        print(self.SVM.support_vectors_)
+
     def load(self):
         self.SVM = pickle.load(open(self.SVM_file_name, "rb"))
         print("SVM loaded:", self.SVM_file_name)
@@ -224,14 +232,11 @@ class moment_SVM(object):
 
 def main(args):
     config = config_evaluation_setup(args)
-
     transform = Compose([ToTensor(), Normalize(config.dataset.mean, config.dataset.std)])
     datloader = config.dataset(root=config.roots.eval_dataset_root, split="test", transform=transform)
     start = time.time()
 
     """Perform Meta Classification"""
-    if not args["metaseg_prepare"] and not args["segment_search"] and not args["fp_removal"]:
-        args["metaseg_prepare"] = args["segment_search"] = args["fp_removal"] = True
     if args["moment_prepare"]:
         print("PREPARE MOMENT INPUT")
         moment_prepare(config.params, config.roots, datloader)
@@ -258,6 +263,7 @@ if __name__ == '__main__':
     """Get Arguments and setup config class"""
     parser = argparse.ArgumentParser(description='OPTIONAL argument setting, see also config.py')
     parser.add_argument("-val", "--VALSET", nargs="?", type=str)
+    parser.add_argument("-train", "--TRAINSET", nargs="?", type=str)
     parser.add_argument("-model", "--MODEL", nargs="?", type=str)
     parser.add_argument("-epoch", "--val_epoch", nargs="?", type=int)
     parser.add_argument("-alpha", "--pareto_alpha", nargs="?", type=float)
@@ -266,5 +272,5 @@ if __name__ == '__main__':
     parser.add_argument("-moment", "--moment_prepare", default=False, action='store_true')
     parser.add_argument("-SVM", "--SVM_train_and_save", default=False, action='store_true')
     parser.add_argument("-segment", "--segment_search", default=False, action='store_true')
-    parser.add_argument("-removal", "--fp_removal", action='store_true')
+    parser.add_argument("-removal", "--fp_removal", default=False, action='store_true')
     main(vars(parser.parse_args()))
